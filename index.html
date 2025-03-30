@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Piano por Sensores Móvil</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #sensor-ball {
+            width: 60px;
+            height: 60px;
+            background-color: #3B82F6;
+            border-radius: 50%;
+            position: absolute;
+            transition: transform 0.1s ease;
+            will-change: transform;
+            z-index: 10;
+        }
+        #visualizer-mode-btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        .fullscreen-mode {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #1F2937;
+            z-index: 50;
+            overflow: hidden;
+        }
+        .selected-scale {
+            background-color: #BFDBFE !important;
+            color: #1E40AF;
+        }
+        .dark .selected-scale {
+            background-color: #1E3A8A !important;
+            color: #BFDBFE;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold mb-2">Piano por Sensores Móvil</h1>
+            <p class="text-lg">Controla el sonido con los movimientos de tu dispositivo</p>
+            <p class="text-sm mt-4 text-gray-600 dark:text-gray-400">Creado por Manuel Puebla Vega</p>
+        </header>
+
+        <div id="controls" class="max-w-3xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-8">
+            <!-- Selector de modo de sonido -->
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-2">Modo de Sonido</h2>
+                <div class="flex space-x-4">
+                    <button id="wave-mode-btn" class="px-4 py-2 bg-blue-600 text-white rounded-lg flex-1">
+                        Onda Sinusoidal
+                    </button>
+                    <button id="piano-mode-btn" class="px-4 py-2 bg-gray-300 dark:bg-gray-600 rounded-lg flex-1">
+                        Piano
+                    </button>
+                </div>
+            </div>
+
+            <!-- Opciones de escala -->
+            <div id="scale-options" class="mb-6 hidden">
+                <h2 class="text-xl font-semibold mb-2">Escala Musical</h2>
+                <div class="grid grid-cols-3 gap-2">
+                    <button data-scale="chromatic" class="selected-scale px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Cromática
+                    </button>
+                    <button data-scale="major" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Mayor
+                    </button>
+                    <button data-scale="minor" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Menor
+                    </button>
+                    <button data-scale="pentatonic" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Pentatónica
+                    </button>
+                    <button data-scale="blues" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Blues
+                    </button>
+                    <button data-scale="dorian" class="px-3 py-2 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                        Dórica
+                    </button>
+                </div>
+            </div>
+
+            <!-- Estado del audio -->
+            <div class="mb-6 bg-gray-200 dark:bg-gray-700 p-4 rounded-lg">
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <h3 class="font-medium">Frecuencia/Nota:</h3>
+                        <div id="frequency-display" class="text-2xl">-</div>
+                    </div>
+                    <div>
+                        <h3 class="font-medium">Volumen:</h3>
+                        <div id="volume-display" class="text-2xl">0%</div>
+                    </div>
+                </div>
+                <div class="flex justify-center space-x-4">
+                    <button id="start-btn" class="px-6 py-3 bg-green-600 text-white rounded-lg text-lg font-semibold">
+                        Iniciar Sonido
+                    </button>
+                    <button id="stop-btn" class="px-6 py-3 bg-red-600 text-white rounded-lg text-lg font-semibold" disabled>
+                        Detener Sonido
+                    </button>
+                </div>
+            </div>
+
+            <!-- Visualización del sensor -->
+            <div class="relative bg-gray-200 dark:bg-gray-700 rounded-lg p-4 mb-6" style="height: 200px;">
+                <div id="sensor-ball"></div>
+            </div>
+        </div>
+    </div>
+
+    <button id="visualizer-mode-btn" class="px-4 py-2 bg-purple-600 text-white rounded-lg shadow-lg">
+        Modo Visualización
+    </button>
+
+    <script>
+        // Variables globales
+        let audioContext;
+        let oscillator;
+        let gainNode;
+        let isPlaying = false;
+        let isVisualizerMode = false;
+        let currentFrequency = 440;
+        let currentVolume = 0.5;
+        let soundMode = 'wave';
+        let currentScale = 'chromatic';
+        let activeNote = null;
+        let orientationHandler = null;
+
+        // Escalas musicales
+        const scales = {
+            chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            major: [0, 2, 4, 5, 7, 9, 11],
+            minor: [0, 2, 3, 5, 7, 8, 10],
+            pentatonic: [0, 2, 4, 7, 9],
+            blues: [0, 3, 5, 6, 7, 10],
+            dorian: [0, 2, 3, 5, 7, 9, 10]
+        };
+
+        // Notas musicales
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+        // Elementos del DOM
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const visualizerModeBtn = document.getElementById('visualizer-mode-btn');
+        const frequencyDisplay = document.getElementById('frequency-display');
+        const volumeDisplay = document.getElementById('volume-display');
+        const sensorBall = document.getElementById('sensor-ball');
+        const waveModeBtn = document.getElementById('wave-mode-btn');
+        const pianoModeBtn = document.getElementById('piano-mode-btn');
+        const scaleOptions = document.getElementById('scale-options');
+
+        // Iniciar audio
+        async function startAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            if (soundMode === 'wave') {
+                oscillator = audioContext.createOscillator();
+                gainNode = audioContext.createGain();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.value = currentFrequency;
+                gainNode.gain.value = currentVolume;
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.start();
+            }
+            
+            isPlaying = true;
+            updateUI();
+            setupOrientationListener();
+        }
+
+        // Detener audio
+        function stopAudio() {
+            if (soundMode === 'wave' && oscillator) {
+                oscillator.stop();
+                oscillator.disconnect();
+                gainNode.disconnect();
+                oscillator = null;
+                gainNode = null;
+            }
+            
+            if (activeNote) {
+                activeNote.stop();
+                activeNote = null;
+            }
+            
+            isPlaying = false;
+            updateUI();
+            removeOrientationListener();
+        }
+
+        // Configurar listener de orientación
+        function setupOrientationListener() {
+            if (!orientationHandler && window.DeviceOrientationEvent) {
+                orientationHandler = (event) => handleOrientation(event);
+                
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission()
+                        .then(permissionState => {
+                            if (permissionState === 'granted') {
+                                window.addEventListener('deviceorientation', orientationHandler);
+                            }
+                        })
+                        .catch(console.error);
+                } else {
+                    window.addEventListener('deviceorientation', orientationHandler);
+                }
+            }
+        }
+
+        // Remover listener de orientación
+        function removeOrientationListener() {
+            if (orientationHandler) {
+                window.removeEventListener('deviceorientation', orientationHandler);
+                orientationHandler = null;
+            }
+        }
+
+        // Actualizar UI
+        function updateUI() {
+            startBtn.disabled = isPlaying;
+            stopBtn.disabled = !isPlaying;
+            
+            waveModeBtn.className = `px-4 py-2 rounded-lg flex-1 ${soundMode === 'wave' ? 'bg-blue-600 text-white' : 'bg-gray-300 dark:bg-gray-600'}`;
+            pianoModeBtn.className = `px-4 py-2 rounded-lg flex-1 ${soundMode === 'piano' ? 'bg-blue-600 text-white' : 'bg-gray-300 dark:bg-gray-600'}`;
+            
+            scaleOptions.classList.toggle('hidden', soundMode !== 'piano');
+        }
+
+        // Crear sonido de piano
+        function createPianoSound(frequency, volume) {
+            const now = audioContext.currentTime;
+            const osc1 = audioContext.createOscillator();
+            const osc2 = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            const envelope = audioContext.createGain();
+            
+            osc1.type = 'triangle';
+            osc2.type = 'sine';
+            osc1.frequency.value = frequency;
+            osc2.frequency.value = frequency * 2;
+            gain.gain.value = volume;
+            
+            // Envolvente
+            envelope.gain.setValueAtTime(0, now);
+            envelope.gain.linearRampToValueAtTime(1, now + 0.01);
+            envelope.gain.exponentialRampToValueAtTime(0.3, now + 0.1);
+            envelope.gain.exponentialRampToValueAtTime(0.001, now + 1.5);
+            
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(envelope);
+            envelope.connect(audioContext.destination);
+            
+            osc1.start();
+            osc2.start();
+            
+            return {
+                stop: () => {
+                    osc1.stop();
+                    osc2.stop();
+                    gain.disconnect();
+                    envelope.disconnect();
+                },
+                setVolume: (vol) => {
+                    gain.gain.value = vol;
+                }
+            };
+        }
+
+        // Mapear inclinación a nota
+        function mapTiltToNote(tilt) {
+            const scale = scales[currentScale];
+            const noteCount = scale.length;
+            const tiltRange = 90; // -45 a 45 grados
+            const normalizedTilt = Math.min(Math.max(tilt, -45), 45);
+            const noteIndex = Math.floor(((normalizedTilt + 45) / tiltRange) * (noteCount - 1));
+            
+            return scale[noteIndex];
+        }
+
+        // Mapear inclinación a volumen
+        function mapTiltToVolume(tilt) {
+            const tiltRange = 60; // -30 a 30 grados
+            const normalizedTilt = Math.min(Math.max(tilt, -30), 30);
+            return (normalizedTilt + 30) / tiltRange;
+        }
+
+        // Manejar orientación del dispositivo
+        function handleOrientation(event) {
+            const beta = event.beta;  // Inclinación adelante/atrás
+            const gamma = event.gamma; // Inclinación izquierda/derecha
+            
+            // Posicionar pelota
+            const x = ((gamma + 90) / 180) * 100;
+            const y = ((beta + 90) / 180) * 100;
+            
+            sensorBall.style.transform = `translate(calc(${x}% - 30px), calc(${y}% - 30px))`;
+            
+            if (!isPlaying || isVisualizerMode) return;
+            
+            currentVolume = mapTiltToVolume(beta);
+            
+            if (soundMode === 'wave') {
+                currentFrequency = 200 * Math.pow(2, (gamma + 45) / 15);
+                oscillator.frequency.value = currentFrequency;
+                gainNode.gain.value = currentVolume;
+                frequencyDisplay.textContent = currentFrequency.toFixed(2) + ' Hz';
+            } else {
+                const noteIndex = mapTiltToNote(gamma);
+                const frequency = 440 * Math.pow(2, (noteIndex - 9) / 12);
+                const octave = 4;
+                const noteName = noteNames[noteIndex];
+                
+                if (!activeNote) {
+                    activeNote = createPianoSound(frequency, currentVolume);
+                } else {
+                    activeNote.setVolume(currentVolume);
+                }
+                
+                frequencyDisplay.innerHTML = `${noteName}<span class="text-sm">${octave}</span>`;
+            }
+            
+            volumeDisplay.textContent = Math.round(currentVolume * 100) + '%';
+        }
+
+        // Alternar modo visualización
+        function toggleVisualizerMode() {
+            isVisualizerMode = !isVisualizerMode;
+            
+            if (isVisualizerMode) {
+                document.body.classList.add('fullscreen-mode');
+                visualizerModeBtn.textContent = 'Salir de Visualización';
+                sensorBall.style.width = '100px';
+                sensorBall.style.height = '100px';
+                sensorBall.style.backgroundColor = '#EC4899';
+            } else {
+                document.body.classList.remove('fullscreen-mode');
+                visualizerModeBtn.textContent = 'Modo Visualización';
+                sensorBall.style.width = '60px';
+                sensorBall.style.height = '60px';
+                sensorBall.style.backgroundColor = '#3B82F6';
+            }
+        }
+
+        // Cambiar modo de sonido
+        function setSoundMode(mode) {
+            if (soundMode !== mode) {
+                soundMode = mode;
+                stopAudio();
+                updateUI();
+            }
+        }
+
+        // Cambiar escala
+        function setScale(scale) {
+            if (currentScale !== scale) {
+                currentScale = scale;
+                stopAudio();
+                
+                document.querySelectorAll('#scale-options button').forEach(btn => {
+                    btn.classList.remove('selected-scale');
+                });
+                document.querySelector(`button[data-scale="${scale}"]`).classList.add('selected-scale');
+            }
+        }
+
+        // Event listeners
+        startBtn.addEventListener('click', startAudio);
+        stopBtn.addEventListener('click', stopAudio);
+        visualizerModeBtn.addEventListener('click', toggleVisualizerMode);
+        waveModeBtn.addEventListener('click', () => setSoundMode('wave'));
+        pianoModeBtn.addEventListener('click', () => setSoundMode('piano'));
+
+        document.querySelectorAll('#scale-options button').forEach(btn => {
+            btn.addEventListener('click', () => setScale(btn.dataset.scale));
+        });
+
+        // Precargar audio en móviles
+        document.addEventListener('touchstart', () => {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                audioContext.suspend();
+            }
+        }, { once: true });
+
+        // Manejar cambios de visibilidad
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && audioContext) {
+                audioContext.suspend();
+            } else if (audioContext && isPlaying) {
+                audioContext.resume();
+            }
+        });
+    </script>
+</body>
+</html>
